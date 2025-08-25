@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { useRouter } from 'next/navigation';
 
@@ -7,10 +7,11 @@ export default function StudyAssistant() {
   const [question, setQuestion] = useState('');
   const [answers, setAnswers] = useState([]);
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    const session = supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       if (!data.session) router.push('/');
       else setUser(data.session.user);
     });
@@ -26,12 +27,33 @@ export default function StudyAssistant() {
   const handleAsk = async () => {
     if (!question) return;
 
-    // Call your AI backend (OpenAI + LangChain + Supabase) here
-    // For MVP, we'll just echo the question
-    const aiAnswer = `AI Answer for: "${question}"`;
+    setLoading(true);
 
-    setAnswers([...answers, { q: question, a: aiAnswer }]);
-    setQuestion('');
+    try {
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: question, k: 5 }) // k = number of top results
+      });
+
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error);
+
+      // Save AI answer with sources
+      setAnswers((prev) => [
+        ...prev,
+        { q: question, a: data.answer, sources: data.sources }
+      ]);
+      setQuestion('');
+    } catch (err) {
+      setAnswers((prev) => [
+        ...prev,
+        { q: question, a: `Error fetching answer: ${err.message}`, sources: [] }
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -45,14 +67,33 @@ export default function StudyAssistant() {
           onChange={(e) => setQuestion(e.target.value)}
           style={{ flex: 1, padding: '0.5rem' }}
         />
-        <button onClick={handleAsk} style={{ padding: '0.5rem 1rem', marginLeft: '0.5rem' }}>Ask</button>
+        <button
+          onClick={handleAsk}
+          style={{ padding: '0.5rem 1rem', marginLeft: '0.5rem' }}
+          disabled={loading}
+        >
+          {loading ? 'Loading...' : 'Ask'}
+        </button>
       </div>
 
       <div>
         {answers.map((item, index) => (
-          <div key={index} style={{ marginBottom: '1rem', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '6px' }}>
+          <div
+            key={index}
+            style={{
+              marginBottom: '1rem',
+              padding: '0.5rem',
+              border: '1px solid #ddd',
+              borderRadius: '6px'
+            }}
+          >
             <p><strong>Q:</strong> {item.q}</p>
             <p><strong>A:</strong> {item.a}</p>
+            {item.sources && item.sources.length > 0 && (
+              <p style={{ fontSize: '0.8rem', color: '#555' }}>
+                Sources: {item.sources.map(s => `#${s.paper_id} (sim:${s.similarity.toFixed(2)})`).join(', ')}
+              </p>
+            )}
           </div>
         ))}
       </div>
